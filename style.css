@@ -53,6 +53,19 @@ img { display: block; max-width: 100%; }
 .panel-header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; color: var(--text-secondary); }
 .panel-header h2 { font-size: 0.82rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
 .panel-info { background: var(--accent-soft); border-color: rgba(245,158,11,0.12); }
+.panel-desc { font-size: 0.7rem; color: var(--text-muted); margin-bottom: 10px; line-height: 1.4; }
+.bleed-info { margin-top: 8px; padding: 6px 10px; background: var(--bg-elevated); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.bleed-info span { font-size: 0.72rem; color: var(--accent); font-weight: 500; }
+
+/* Frame Upload */
+.frame-upload-row { display: flex; gap: 10px; align-items: center; }
+.frame-preview { width: 60px; height: 90px; border: 2px dashed var(--border-hover); border-radius: var(--radius-sm); display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all var(--transition); background: var(--bg-elevated); overflow: hidden; flex-shrink: 0; }
+.frame-preview:hover { border-color: var(--accent); background: var(--accent-glow); }
+.frame-preview svg { color: var(--text-muted); }
+.frame-preview span { font-size: 0.6rem; color: var(--text-muted); margin-top: 2px; }
+.frame-preview img { width: 100%; height: 100%; object-fit: cover; }
+.frame-preview.has-image { border-style: solid; border-color: var(--accent); }
+.frame-info { display: flex; flex-direction: column; gap: 2px; }
 
 /* Drop Zone */
 .upload-drop-zone { border: 2px dashed var(--border-hover); border-radius: var(--radius-md); padding: 24px 16px; text-align: center; cursor: pointer; transition: all var(--transition); background: var(--bg-elevated); }

@@ -1,6 +1,9 @@
 // ========== State ==========
 const state = {
   cards: [],        // [{file, name, url}] — sorted by filename
+  frameFile: null,  // single frame image File
+  frameUrl: null,   // object URL for frame
+  frameDataUrl: null, // base64 for PDF
   currentSide: 'front',
   currentSheet: 0,
   layout: null
@@ -18,9 +21,12 @@ const $ = id => document.getElementById(id);
 const el = {
   dropZone: $('dropZone'), cardInput: $('cardInput'), clearBtn: $('clearBtn'),
   uploadCount: $('uploadCount'), thumbStrip: $('thumbStrip'),
+  framePreview: $('framePreview'), frameInput: $('frameInput'), frameStatus: $('frameStatus'),
   pagePreset: $('pagePreset'), pageWidth: $('pageWidth'), pageHeight: $('pageHeight'),
-  cardWidth: $('cardWidth'), cardHeight: $('cardHeight'),
-  bleed: $('bleed'), gap: $('gap'), margin: $('margin'),
+  boxWidth: $('boxWidth'), boxHeight: $('boxHeight'),
+  cutWidth: $('cutWidth'), cutHeight: $('cutHeight'),
+  bleedInfo: $('bleedInfo'),
+  gap: $('gap'), margin: $('margin'),
   cutLineStyle: $('cutLineStyle'),
   canvas: $('previewCanvas'), previewEmpty: $('previewEmpty'),
   tabFront: $('tabFront'), tabBack: $('tabBack'),
@@ -36,6 +42,10 @@ const el = {
 
 // ========== Init ==========
 function init() {
+  // Frame upload
+  el.framePreview.addEventListener('click', () => el.frameInput.click());
+  el.frameInput.addEventListener('change', handleFrameUpload);
+
   // Drop zone
   el.dropZone.addEventListener('click', () => el.cardInput.click());
   el.dropZone.addEventListener('dragover', e => { e.preventDefault(); el.dropZone.classList.add('dragover'); });
@@ -55,7 +65,7 @@ function init() {
   });
 
   // Inputs
-  [el.pageWidth, el.pageHeight, el.cardWidth, el.cardHeight, el.bleed, el.gap, el.margin]
+  [el.pageWidth, el.pageHeight, el.boxWidth, el.boxHeight, el.cutWidth, el.cutHeight, el.gap, el.margin]
     .forEach(inp => inp.addEventListener('input', recalculate));
   el.cutLineStyle.addEventListener('change', updatePreview);
 
@@ -77,6 +87,30 @@ function setTab(side) {
 // ========== File Handling ==========
 function naturalSort(a, b) {
   return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function handleFrameUpload(e) {
+  const file = e.target.files[0];
+  if (!file || !file.type.startsWith('image/')) return;
+  
+  if (state.frameUrl) URL.revokeObjectURL(state.frameUrl);
+  state.frameFile = file;
+  state.frameUrl = URL.createObjectURL(file);
+  
+  // Show preview
+  el.framePreview.innerHTML = '';
+  const img = document.createElement('img');
+  img.src = state.frameUrl;
+  el.framePreview.appendChild(img);
+  el.framePreview.classList.add('has-image');
+  el.frameStatus.textContent = file.name;
+  
+  // Pre-load base64 for PDF
+  readFileAsDataURL(file).then(dataUrl => { state.frameDataUrl = dataUrl; });
+  
+  updateGenerateBtn();
+  updatePreview();
+  showToast('Frame berhasil diupload!', 'success');
 }
 
 function handleFiles(fileList) {
@@ -134,12 +168,16 @@ function updateGenerateBtn() {
 
 // ========== Layout Calculation ==========
 function getConfig() {
+  const boxW = parseFloat(el.boxWidth.value) || 59.32;
+  const boxH = parseFloat(el.boxHeight.value) || 94;
+  const cutW = parseFloat(el.cutWidth.value) || 55.5;
+  const cutH = parseFloat(el.cutHeight.value) || 86.5;
+  const bleedX = (boxW - cutW) / 2;
+  const bleedY = (boxH - cutH) / 2;
   return {
     pageW: parseFloat(el.pageWidth.value) || 692,
     pageH: parseFloat(el.pageHeight.value) || 498,
-    cardW: parseFloat(el.cardWidth.value) || 59.32,
-    cardH: parseFloat(el.cardHeight.value) || 94,
-    bleed: parseFloat(el.bleed.value) || 0,
+    boxW, boxH, cutW, cutH, bleedX, bleedY,
     gap: parseFloat(el.gap.value) || 0,
     margin: parseFloat(el.margin.value) || 10,
     cutStyle: el.cutLineStyle.value
@@ -147,25 +185,23 @@ function getConfig() {
 }
 
 function calculateLayout(cfg) {
-  const cellW = cfg.cardW + cfg.bleed * 2;
-  const cellH = cfg.cardH + cfg.bleed * 2;
   const centerGap = 10;
   const halfW = (cfg.pageW - cfg.margin * 2 - centerGap) / 2;
   const printH = cfg.pageH - cfg.margin * 2;
 
-  const cols = Math.max(1, Math.floor((halfW + cfg.gap) / (cellW + cfg.gap)));
-  const rows = Math.max(1, Math.floor((printH + cfg.gap) / (cellH + cfg.gap)));
+  const cols = Math.max(1, Math.floor((halfW + cfg.gap) / (cfg.boxW + cfg.gap)));
+  const rows = Math.max(1, Math.floor((printH + cfg.gap) / (cfg.boxH + cfg.gap)));
   const perSheet = cols * rows;
   const totalCards = state.cards.length || 500;
   const sheets = Math.ceil(totalCards / perSheet);
 
-  const usedW = cols * cellW + (cols - 1) * cfg.gap;
-  const usedH = rows * cellH + (rows - 1) * cfg.gap;
+  const usedW = cols * cfg.boxW + (cols - 1) * cfg.gap;
+  const usedH = rows * cfg.boxH + (rows - 1) * cfg.gap;
   const leftOffX = cfg.margin + (halfW - usedW) / 2;
   const rightOffX = cfg.margin + halfW + centerGap + (halfW - usedW) / 2;
   const offY = cfg.margin + (printH - usedH) / 2;
 
-  return { cols, rows, perSheet, sheets, cellW, cellH, leftOffX, rightOffX, offY, halfW, centerGap, totalCards };
+  return { cols, rows, perSheet, sheets, leftOffX, rightOffX, offY, halfW, centerGap, totalCards };
 }
 
 function recalculate() {
@@ -173,6 +209,9 @@ function recalculate() {
   const L = calculateLayout(cfg);
   state.layout = L;
   state.currentSheet = Math.min(state.currentSheet, Math.max(0, L.sheets - 1));
+
+  // Update bleed info display
+  el.bleedInfo.innerHTML = `<span>Bleed: ${cfg.bleedX.toFixed(2)}mm (kiri/kanan) × ${cfg.bleedY.toFixed(2)}mm (atas/bawah)</span>`;
 
   el.infoGrid.textContent = `${L.cols} × ${L.rows}`;
   el.infoPerSheet.textContent = L.perSheet;
@@ -231,28 +270,34 @@ async function drawPreview() {
     }
   }
   const loadedImgs = await Promise.all(images);
+  const frameImg = state.frameUrl ? await loadImg(state.frameUrl) : null;
+
+  const blX = cfg.bleedX * scale;
+  const blY = cfg.bleedY * scale;
 
   // Draw LEFT half (FRONT — mirrored columns)
   for (let r = 0; r < L.rows; r++) {
     for (let c = 0; c < L.cols; c++) {
       const idx = r * L.cols + c;
       const mirrorC = L.cols - 1 - c;
-      const x = (L.leftOffX + mirrorC * (L.cellW + cfg.gap)) * scale;
-      const y = (L.offY + r * (L.cellH + cfg.gap)) * scale;
-      const w = L.cellW * scale;
-      const h = L.cellH * scale;
+      const cx = (L.leftOffX + mirrorC * (cfg.boxW + cfg.gap)) * scale;
+      const cy = (L.offY + r * (cfg.boxH + cfg.gap)) * scale;
+      const cw = cfg.boxW * scale;
+      const ch = cfg.boxH * scale;
 
-      ctx.fillStyle = isFront ? '#FFF8F0' : '#F0F0F0';
-      ctx.fillRect(x, y, w, h);
-      if (loadedImgs[idx]) ctx.drawImage(loadedImgs[idx], x, y, w, h);
-
-      ctx.strokeStyle = '#DDD'; ctx.lineWidth = 0.5; ctx.setLineDash([]); ctx.strokeRect(x, y, w, h);
+      // 1. White background
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(cx, cy, cw, ch);
+      // 2. Frame image (full box size)
+      if (frameImg) ctx.drawImage(frameImg, cx, cy, cw, ch);
+      // 3. Card image (centered inside frame, at bleed offset)
+      if (loadedImgs[idx]) ctx.drawImage(loadedImgs[idx], cx + blX, cy + blY, cfg.cutW * scale, cfg.cutH * scale);
 
       // Label
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.font = `${8 * (scale / 2)}px Inter, sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = `${7 * (scale / 2)}px Inter, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillText(`${startIdx + idx + 1}`, x + w / 2, y + h - 3);
+      ctx.fillText(`${startIdx + idx + 1}`, cx + cw / 2, cy + ch - 2);
     }
   }
 
@@ -260,33 +305,35 @@ async function drawPreview() {
   for (let r = 0; r < L.rows; r++) {
     for (let c = 0; c < L.cols; c++) {
       const idx = r * L.cols + c;
-      const x = (L.rightOffX + c * (L.cellW + cfg.gap)) * scale;
-      const y = (L.offY + r * (L.cellH + cfg.gap)) * scale;
-      const w = L.cellW * scale;
-      const h = L.cellH * scale;
+      const cx = (L.rightOffX + c * (cfg.boxW + cfg.gap)) * scale;
+      const cy = (L.offY + r * (cfg.boxH + cfg.gap)) * scale;
+      const cw = cfg.boxW * scale;
+      const ch = cfg.boxH * scale;
 
-      ctx.fillStyle = isFront ? '#F0F0F0' : '#F0F8FF';
-      ctx.fillRect(x, y, w, h);
-      if (loadedImgs[idx]) ctx.drawImage(loadedImgs[idx], x, y, w, h);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(cx, cy, cw, ch);
+      // Back side: same composite (frame + card)
+      if (frameImg) ctx.drawImage(frameImg, cx, cy, cw, ch);
+      if (loadedImgs[idx]) ctx.drawImage(loadedImgs[idx], cx + blX, cy + blY, cfg.cutW * scale, cfg.cutH * scale);
 
-      ctx.strokeStyle = '#DDD'; ctx.lineWidth = 0.5; ctx.setLineDash([]); ctx.strokeRect(x, y, w, h);
-
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.font = `${8 * (scale / 2)}px Inter, sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = `${7 * (scale / 2)}px Inter, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillText(`${startIdx + idx + 1}`, x + w / 2, y + h - 3);
+      ctx.fillText(`${startIdx + idx + 1}`, cx + cw / 2, cy + ch - 2);
     }
   }
 
-  // Cut lines on left half (front)
-  drawCutLinesCanvas(ctx, cfg, L, scale);
-  // Solid red grid on right half (back)
-  drawBackGridCanvas(ctx, cfg, L, scale);
+  // FRONT: solid red outer frame grid
+  drawOuterFrameCanvas(ctx, cfg, L, scale, 'left');
+  // FRONT: dashed cut lines (full grid lines through page)
+  if (cfg.cutStyle !== 'none') drawCutLinesCanvas(ctx, cfg, L, scale);
+  // BACK: solid red grid
+  drawOuterFrameCanvas(ctx, cfg, L, scale, 'right');
 
   // Center divider
-  const cx = (cfg.margin + L.halfW + L.centerGap / 2) * scale;
+  const cdx = (cfg.margin + L.halfW + L.centerGap / 2) * scale;
   ctx.strokeStyle = '#999'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cdx, 0); ctx.lineTo(cdx, canvas.height); ctx.stroke();
   ctx.setLineDash([]);
 
   // Page border
@@ -296,37 +343,44 @@ async function drawPreview() {
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   ctx.font = `bold ${9 * (scale / 2)}px Inter, sans-serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  ctx.fillText('DEPAN (MIRROR)', (cfg.margin + L.halfW / 2) * scale, 4);
-  ctx.fillText('BELAKANG (NORMAL)', (cfg.margin + L.halfW + L.centerGap + L.halfW / 2) * scale, 4);
+  ctx.fillText('POSISI DEPAN (ADA GARIS POTONG)', (cfg.margin + L.halfW / 2) * scale, 4);
+  ctx.fillText('POSISI BELAKANG TANPA GARIS POTONG', (cfg.margin + L.halfW + L.centerGap + L.halfW / 2) * scale, 4);
 }
 
-function drawCutLinesCanvas(ctx, cfg, L, scale) {
-  if (cfg.cutStyle === 'none') return;
-  ctx.strokeStyle = '#333'; ctx.lineWidth = 0.8;
-  ctx.setLineDash(cfg.cutStyle === 'dashed' ? [6, 4] : []);
-  const halfEnd = (cfg.margin + L.halfW + L.centerGap / 2) * scale;
+// Solid red outer frame grid (used for both front and back)
+function drawOuterFrameCanvas(ctx, cfg, L, scale, side) {
+  ctx.strokeStyle = '#E53E3E'; ctx.lineWidth = 1.2; ctx.setLineDash([]);
+  const offX = side === 'left' ? L.leftOffX : L.rightOffX;
+  const startX = side === 'left' ? 0 : (cfg.margin + L.halfW + L.centerGap / 2) * scale;
+  const endX = side === 'left' ? (cfg.margin + L.halfW + L.centerGap / 2) * scale : ctx.canvas.width;
+
   for (let c = 0; c <= L.cols; c++) {
-    const x = (L.leftOffX + c * (L.cellW + cfg.gap) - cfg.gap / 2) * scale;
+    const x = (offX + c * (cfg.boxW + cfg.gap) - cfg.gap / 2) * scale;
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
   }
   for (let r = 0; r <= L.rows; r++) {
-    const y = (L.offY + r * (L.cellH + cfg.gap) - cfg.gap / 2) * scale;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(halfEnd, y); ctx.stroke();
+    const y = (L.offY + r * (cfg.boxH + cfg.gap) - cfg.gap / 2) * scale;
+    ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(endX, y); ctx.stroke();
+  }
+}
+
+// Dashed cut lines INSIDE each cell on front (left) half
+function drawCutLinesCanvas(ctx, cfg, L, scale) {
+  if (cfg.bleedX <= 0 && cfg.bleedY <= 0) return;
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 0.7;
+  ctx.setLineDash(cfg.cutStyle === 'dashed' ? [5, 3] : []);
+
+  for (let r = 0; r < L.rows; r++) {
+    for (let c = 0; c < L.cols; c++) {
+      const mirrorC = L.cols - 1 - c;
+      const cx = (L.leftOffX + mirrorC * (cfg.boxW + cfg.gap) + cfg.bleedX) * scale;
+      const cy = (L.offY + r * (cfg.boxH + cfg.gap) + cfg.bleedY) * scale;
+      const cw = cfg.cutW * scale;
+      const ch = cfg.cutH * scale;
+      ctx.strokeRect(cx, cy, cw, ch);
+    }
   }
   ctx.setLineDash([]);
-}
-
-function drawBackGridCanvas(ctx, cfg, L, scale) {
-  ctx.strokeStyle = '#E53E3E'; ctx.lineWidth = 1; ctx.setLineDash([]);
-  const rightStart = (cfg.margin + L.halfW + L.centerGap / 2) * scale;
-  for (let c = 0; c <= L.cols; c++) {
-    const x = (L.rightOffX + c * (L.cellW + cfg.gap) - cfg.gap / 2) * scale;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
-  }
-  for (let r = 0; r <= L.rows; r++) {
-    const y = (L.offY + r * (L.cellH + cfg.gap) - cfg.gap / 2) * scale;
-    ctx.beginPath(); ctx.moveTo(rightStart, y); ctx.lineTo(ctx.canvas.width, y); ctx.stroke();
-  }
 }
 
 // ========== PDF Generation ==========
@@ -365,33 +419,38 @@ async function generatePDF() {
       if (s > 0) doc.addPage([cfg.pageW, cfg.pageH], orient);
       const startIdx = s * L.perSheet;
 
-      // LEFT = FRONT (mirrored columns)
+      // LEFT = FRONT (mirrored columns) — frame + card composite
       for (let r = 0; r < L.rows; r++) {
         for (let c = 0; c < L.cols; c++) {
           const idx = startIdx + r * L.cols + c;
           if (idx >= state.cards.length) continue;
           const mirrorC = L.cols - 1 - c;
-          const x = L.leftOffX + mirrorC * (L.cellW + cfg.gap);
-          const y = L.offY + r * (L.cellH + cfg.gap);
-          doc.addImage(allImageData[idx], 'JPEG', x, y, L.cellW, L.cellH, `card_${idx}`, 'FAST');
+          const x = L.leftOffX + mirrorC * (cfg.boxW + cfg.gap);
+          const y = L.offY + r * (cfg.boxH + cfg.gap);
+          // Frame background (same for all)
+          if (state.frameDataUrl) doc.addImage(state.frameDataUrl, 'JPEG', x, y, cfg.boxW, cfg.boxH, 'frame', 'FAST');
+          // Card overlay (unique, centered)
+          doc.addImage(allImageData[idx], 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, `card_${idx}`, 'FAST');
         }
       }
 
-      // RIGHT = BACK (normal order, same images)
+      // RIGHT = BACK (normal order) — frame + card composite
       for (let r = 0; r < L.rows; r++) {
         for (let c = 0; c < L.cols; c++) {
           const idx = startIdx + r * L.cols + c;
           if (idx >= state.cards.length) continue;
-          const x = L.rightOffX + c * (L.cellW + cfg.gap);
-          const y = L.offY + r * (L.cellH + cfg.gap);
-          doc.addImage(allImageData[idx], 'JPEG', x, y, L.cellW, L.cellH, `card_${idx}`, 'FAST');
+          const x = L.rightOffX + c * (cfg.boxW + cfg.gap);
+          const y = L.offY + r * (cfg.boxH + cfg.gap);
+          if (state.frameDataUrl) doc.addImage(state.frameDataUrl, 'JPEG', x, y, cfg.boxW, cfg.boxH, 'frame', 'FAST');
+          doc.addImage(allImageData[idx], 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, `card_${idx}`, 'FAST');
         }
       }
 
-      // Cut lines (front/left half)
+      // Front: solid red outer frame + dashed inner cut lines
+      drawOuterFramePDF(doc, cfg, L, 'left');
       drawCutLinesPDF(doc, cfg, L);
-      // Solid grid (back/right half)
-      drawBackGridPDF(doc, cfg, L);
+      // Back: solid red grid only
+      drawOuterFramePDF(doc, cfg, L, 'right');
 
       const pct = 30 + ((s + 1) / L.sheets) * 65;
       updateProgress(pct, `Sheet ${s + 1} / ${L.sheets}...`);
@@ -412,44 +471,45 @@ async function generatePDF() {
   setTimeout(() => el.progressContainer.classList.remove('active'), 2000);
 }
 
-function drawCutLinesPDF(doc, cfg, L) {
-  if (cfg.cutStyle === 'none') return;
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.15);
-  const halfEnd = cfg.margin + L.halfW + L.centerGap / 2;
-
-  if (cfg.cutStyle === 'dashed') {
-    for (let c = 0; c <= L.cols; c++) {
-      const x = L.leftOffX + c * (L.cellW + cfg.gap) - cfg.gap / 2;
-      drawDashedLine(doc, x, 0, x, cfg.pageH);
-    }
-    for (let r = 0; r <= L.rows; r++) {
-      const y = L.offY + r * (L.cellH + cfg.gap) - cfg.gap / 2;
-      drawDashedLine(doc, 0, y, halfEnd, y);
-    }
-  } else {
-    for (let c = 0; c <= L.cols; c++) {
-      const x = L.leftOffX + c * (L.cellW + cfg.gap) - cfg.gap / 2;
-      doc.line(x, 0, x, cfg.pageH);
-    }
-    for (let r = 0; r <= L.rows; r++) {
-      const y = L.offY + r * (L.cellH + cfg.gap) - cfg.gap / 2;
-      doc.line(0, y, halfEnd, y);
-    }
-  }
-}
-
-function drawBackGridPDF(doc, cfg, L) {
+// Solid red outer frame grid in PDF
+function drawOuterFramePDF(doc, cfg, L, side) {
   doc.setDrawColor(229, 62, 62);
-  doc.setLineWidth(0.2);
-  const rightStart = cfg.margin + L.halfW + L.centerGap / 2;
+  doc.setLineWidth(0.25);
+  const offX = side === 'left' ? L.leftOffX : L.rightOffX;
+  const startX = side === 'left' ? 0 : cfg.margin + L.halfW + L.centerGap / 2;
+  const endX = side === 'left' ? cfg.margin + L.halfW + L.centerGap / 2 : cfg.pageW;
+
   for (let c = 0; c <= L.cols; c++) {
-    const x = L.rightOffX + c * (L.cellW + cfg.gap) - cfg.gap / 2;
+    const x = offX + c * (cfg.boxW + cfg.gap) - cfg.gap / 2;
     doc.line(x, 0, x, cfg.pageH);
   }
   for (let r = 0; r <= L.rows; r++) {
-    const y = L.offY + r * (L.cellH + cfg.gap) - cfg.gap / 2;
-    doc.line(rightStart, y, cfg.pageW, y);
+    const y = L.offY + r * (cfg.boxH + cfg.gap) - cfg.gap / 2;
+    doc.line(startX, y, endX, y);
+  }
+}
+
+// Dashed cut lines inside each cell on front (left) half in PDF
+function drawCutLinesPDF(doc, cfg, L) {
+  if (cfg.cutStyle === 'none' || (cfg.bleedX <= 0 && cfg.bleedY <= 0)) return;
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.12);
+
+  for (let r = 0; r < L.rows; r++) {
+    for (let c = 0; c < L.cols; c++) {
+      const mirrorC = L.cols - 1 - c;
+      const x = L.leftOffX + mirrorC * (cfg.boxW + cfg.gap) + cfg.bleedX;
+      const y = L.offY + r * (cfg.boxH + cfg.gap) + cfg.bleedY;
+
+      if (cfg.cutStyle === 'dashed') {
+        drawDashedLine(doc, x, y, x + cfg.cutW, y);
+        drawDashedLine(doc, x + cfg.cutW, y, x + cfg.cutW, y + cfg.cutH);
+        drawDashedLine(doc, x + cfg.cutW, y + cfg.cutH, x, y + cfg.cutH);
+        drawDashedLine(doc, x, y + cfg.cutH, x, y);
+      } else {
+        doc.rect(x, y, cfg.cutW, cfg.cutH);
+      }
+    }
   }
 }
 
