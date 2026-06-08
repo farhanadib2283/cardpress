@@ -87,8 +87,7 @@
         <div class="form-group">
           <label for="pagePreset">Preset</label>
           <select id="pagePreset">
-            <option value="plano-692x498" selected>A3+ Work & Turn (692×498)</option>
-            <option value="sra3-landscape">SRA3 Landscape (450×320)</option>
+            <option value="a3plus-310x470" selected>A3+ (310×470)</option>
             <option value="a3-landscape">A3 Landscape (420×297)</option>
             <option value="custom">Custom</option>
           </select>
@@ -96,11 +95,11 @@
         <div class="form-row">
           <div class="form-group">
             <label for="pageWidth">Width (mm)</label>
-            <input type="number" id="pageWidth" value="692" min="100" max="1200" step="1">
+            <input type="number" id="pageWidth" value="310" min="100" max="1200" step="1">
           </div>
           <div class="form-group">
             <label for="pageHeight">Height (mm)</label>
-            <input type="number" id="pageHeight" value="498" min="100" max="1200" step="1">
+            <input type="number" id="pageHeight" value="470" min="100" max="1200" step="1">
           </div>
         </div>
       </section>
@@ -221,7 +220,7 @@
         <canvas id="previewCanvas"></canvas>
       </div>
       <div class="preview-footer">
-        <span class="preview-hint">💡 Work & Turn — Depan (kiri, mirror) + Belakang (kanan, normal). Setiap kartu unik.</span>
+        <span class="preview-hint">💡 Halaman ganjil = DEPAN (frame + garis potong), Halaman genap = BELAKANG (mirror). Setiap kartu unik.</span>
       </div>
     </div>
   </main>
