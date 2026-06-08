@@ -155,7 +155,7 @@ function getConfig() {
     pageH: parseFloat(el.pageHeight.value) || 470,
     boxW, boxH, cutW, cutH, bleedX, bleedY,
     gap: parseFloat(el.gap.value) || 0,
-    margin: parseFloat(el.margin.value) || 5,
+    margin: parseFloat(el.margin.value) || 0,
     cutStyle: el.cutLineStyle.value
   };
 }
