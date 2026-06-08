@@ -274,7 +274,9 @@ async function drawPreview() {
     }
   }
 
-  // Crop marks at corners of each cell
+  // Red grid lines (full cell borders)
+  drawGridCanvas(ctx, cfg, L, scale);
+  // Crop marks at card boundary inside each cell
   drawCropMarksCanvas(ctx, cfg, L, scale);
 
   // Page border
@@ -288,30 +290,45 @@ async function drawPreview() {
   ctx.fillText(isFront ? 'POSISI DEPAN (ADA GARIS POTONG)' : 'POSISI BELAKANG (MIRROR, TANPA GARIS POTONG)', cfg.pageW * scale / 2, 4);
 }
 
-function drawCropMarksCanvas(ctx, cfg, L, scale) {
+function drawGridCanvas(ctx, cfg, L, scale) {
   ctx.strokeStyle = '#E53E3E'; ctx.lineWidth = 1.2; ctx.setLineDash([]);
-  const markLen = 4 * scale; // 4mm crop mark length
-  const markGap = 1.5 * scale; // 1.5mm gap from corner
+  for (let c = 0; c <= L.cols; c++) {
+    const x = (L.offX + c * (cfg.boxW + cfg.gap) - cfg.gap / 2) * scale;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
+  }
+  for (let r = 0; r <= L.rows; r++) {
+    const y = (L.offY + r * (cfg.boxH + cfg.gap) - cfg.gap / 2) * scale;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ctx.canvas.width, y); ctx.stroke();
+  }
+}
+
+function drawCropMarksCanvas(ctx, cfg, L, scale) {
+  if (cfg.bleedX <= 0 && cfg.bleedY <= 0) return;
+  ctx.strokeStyle = '#E53E3E'; ctx.lineWidth = 0.8; ctx.setLineDash([]);
+  const m = 3 * scale; // mark length 3mm
 
   for (let r = 0; r < L.rows; r++) {
     for (let c = 0; c < L.cols; c++) {
-      const x = (L.offX + c * (cfg.boxW + cfg.gap)) * scale;
-      const y = (L.offY + r * (cfg.boxH + cfg.gap)) * scale;
-      const w = cfg.boxW * scale;
-      const h = cfg.boxH * scale;
+      const bx = (L.offX + c * (cfg.boxW + cfg.gap)) * scale;
+      const by = (L.offY + r * (cfg.boxH + cfg.gap)) * scale;
+      // Card boundary inside cell
+      const cx = bx + cfg.bleedX * scale;
+      const cy = by + cfg.bleedY * scale;
+      const cw = cfg.cutW * scale;
+      const ch = cfg.cutH * scale;
 
-      // Top-left corner
-      ctx.beginPath(); ctx.moveTo(x - markGap, y - markGap - markLen); ctx.lineTo(x - markGap, y - markGap); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x - markGap - markLen, y - markGap); ctx.lineTo(x - markGap, y - markGap); ctx.stroke();
-      // Top-right corner
-      ctx.beginPath(); ctx.moveTo(x + w + markGap, y - markGap - markLen); ctx.lineTo(x + w + markGap, y - markGap); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x + w + markGap, y - markGap); ctx.lineTo(x + w + markGap + markLen, y - markGap); ctx.stroke();
-      // Bottom-left corner
-      ctx.beginPath(); ctx.moveTo(x - markGap, y + h + markGap); ctx.lineTo(x - markGap, y + h + markGap + markLen); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x - markGap - markLen, y + h + markGap); ctx.lineTo(x - markGap, y + h + markGap); ctx.stroke();
-      // Bottom-right corner
-      ctx.beginPath(); ctx.moveTo(x + w + markGap, y + h + markGap); ctx.lineTo(x + w + markGap, y + h + markGap + markLen); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x + w + markGap, y + h + markGap); ctx.lineTo(x + w + markGap + markLen, y + h + markGap); ctx.stroke();
+      // Top-left
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + m, cy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy + m); ctx.stroke();
+      // Top-right
+      ctx.beginPath(); ctx.moveTo(cx + cw, cy); ctx.lineTo(cx + cw - m, cy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + cw, cy); ctx.lineTo(cx + cw, cy + m); ctx.stroke();
+      // Bottom-left
+      ctx.beginPath(); ctx.moveTo(cx, cy + ch); ctx.lineTo(cx + m, cy + ch); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy + ch); ctx.lineTo(cx, cy + ch - m); ctx.stroke();
+      // Bottom-right
+      ctx.beginPath(); ctx.moveTo(cx + cw, cy + ch); ctx.lineTo(cx + cw - m, cy + ch); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + cw, cy + ch); ctx.lineTo(cx + cw, cy + ch - m); ctx.stroke();
     }
   }
 }
@@ -365,7 +382,8 @@ async function generatePDF() {
           doc.addImage(allImageData[idx], 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, `card_${idx}`, 'FAST');
         }
       }
-      // Front: crop marks
+      // Front: grid + crop marks
+      drawGridPDF(doc, cfg, L);
       drawCropMarksPDF(doc, cfg, L);
 
       // === PAGE 2: BACK (mirrored columns) ===
@@ -384,7 +402,8 @@ async function generatePDF() {
           doc.addImage(allImageData[idx], 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, `card_${idx}`, 'FAST');
         }
       }
-      // Back: crop marks
+      // Back: grid + crop marks
+      drawGridPDF(doc, cfg, L);
       drawCropMarksPDF(doc, cfg, L);
 
       const pct = 30 + ((s + 1) / L.sheets) * 65;
@@ -406,31 +425,46 @@ async function generatePDF() {
   setTimeout(() => el.progressContainer.classList.remove('active'), 2000);
 }
 
-function drawCropMarksPDF(doc, cfg, L) {
+function drawGridPDF(doc, cfg, L) {
   doc.setDrawColor(229, 62, 62);
-  doc.setLineWidth(0.2);
-  const m = 3; // mark length in mm
-  const g = 1; // gap from corner in mm
+  doc.setLineWidth(0.25);
+  for (let c = 0; c <= L.cols; c++) {
+    const x = L.offX + c * (cfg.boxW + cfg.gap) - cfg.gap / 2;
+    doc.line(x, 0, x, cfg.pageH);
+  }
+  for (let r = 0; r <= L.rows; r++) {
+    const y = L.offY + r * (cfg.boxH + cfg.gap) - cfg.gap / 2;
+    doc.line(0, y, cfg.pageW, y);
+  }
+}
+
+function drawCropMarksPDF(doc, cfg, L) {
+  if (cfg.bleedX <= 0 && cfg.bleedY <= 0) return;
+  doc.setDrawColor(229, 62, 62);
+  doc.setLineWidth(0.15);
+  const m = 3;
 
   for (let r = 0; r < L.rows; r++) {
     for (let c = 0; c < L.cols; c++) {
-      const x = L.offX + c * (cfg.boxW + cfg.gap);
-      const y = L.offY + r * (cfg.boxH + cfg.gap);
-      const w = cfg.boxW;
-      const h = cfg.boxH;
+      const bx = L.offX + c * (cfg.boxW + cfg.gap);
+      const by = L.offY + r * (cfg.boxH + cfg.gap);
+      const cx = bx + cfg.bleedX;
+      const cy = by + cfg.bleedY;
+      const cw = cfg.cutW;
+      const ch = cfg.cutH;
 
       // Top-left
-      doc.line(x - g, y - g - m, x - g, y - g);
-      doc.line(x - g - m, y - g, x - g, y - g);
+      doc.line(cx, cy, cx + m, cy);
+      doc.line(cx, cy, cx, cy + m);
       // Top-right
-      doc.line(x + w + g, y - g - m, x + w + g, y - g);
-      doc.line(x + w + g, y - g, x + w + g + m, y - g);
+      doc.line(cx + cw, cy, cx + cw - m, cy);
+      doc.line(cx + cw, cy, cx + cw, cy + m);
       // Bottom-left
-      doc.line(x - g, y + h + g, x - g, y + h + g + m);
-      doc.line(x - g - m, y + h + g, x - g, y + h + g);
+      doc.line(cx, cy + ch, cx + m, cy + ch);
+      doc.line(cx, cy + ch, cx, cy + ch - m);
       // Bottom-right
-      doc.line(x + w + g, y + h + g, x + w + g, y + h + g + m);
-      doc.line(x + w + g, y + h + g, x + w + g + m, y + h + g);
+      doc.line(cx + cw, cy + ch, cx + cw - m, cy + ch);
+      doc.line(cx + cw, cy + ch, cx + cw, cy + ch - m);
     }
   }
 }
