@@ -376,13 +376,14 @@ async function generatePDF() {
           if (idx >= state.cards.length) continue;
           const x = L.offX + c * (cfg.boxW + cfg.gap);
           const y = L.offY + r * (cfg.boxH + cfg.gap);
-          // Frame background
-          if (state.frameDataUrl) doc.addImage(state.frameDataUrl, 'JPEG', x, y, cfg.boxW, cfg.boxH, 'frame', 'FAST');
-          // Card overlay
-          doc.addImage(allImageData[idx], 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, `card_${idx}`, 'FAST');
+          if (state.frameDataUrl) {
+            const fmt = state.frameDataUrl.includes('image/png') ? 'PNG' : 'JPEG';
+            doc.addImage(state.frameDataUrl, fmt, x, y, cfg.boxW, cfg.boxH);
+          }
+          const cfmt = allImageData[idx].includes('image/png') ? 'PNG' : 'JPEG';
+          doc.addImage(allImageData[idx], cfmt, x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH);
         }
       }
-      // Front: grid + crop marks
       drawGridPDF(doc, cfg, L);
       drawCropMarksPDF(doc, cfg, L);
 
@@ -396,19 +397,20 @@ async function generatePDF() {
           const mirrorC = L.cols - 1 - c;
           const x = L.offX + mirrorC * (cfg.boxW + cfg.gap);
           const y = L.offY + r * (cfg.boxH + cfg.gap);
-          // Frame background (same)
-          if (state.frameDataUrl) doc.addImage(state.frameDataUrl, 'JPEG', x, y, cfg.boxW, cfg.boxH, 'frame', 'FAST');
-          // Card overlay (unique)
-          doc.addImage(allImageData[idx], 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, `card_${idx}`, 'FAST');
+          if (state.frameDataUrl) {
+            const fmt = state.frameDataUrl.includes('image/png') ? 'PNG' : 'JPEG';
+            doc.addImage(state.frameDataUrl, fmt, x, y, cfg.boxW, cfg.boxH);
+          }
+          const cfmt = allImageData[idx].includes('image/png') ? 'PNG' : 'JPEG';
+          doc.addImage(allImageData[idx], cfmt, x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH);
         }
       }
-      // Back: grid + crop marks
       drawGridPDF(doc, cfg, L);
       drawCropMarksPDF(doc, cfg, L);
 
       const pct = 30 + ((s + 1) / L.sheets) * 65;
       updateProgress(pct, `Sheet ${s + 1} / ${L.sheets}...`);
-      await sleep(5);
+      await sleep(10);
     }
 
     updateProgress(98, 'Saving PDF...');
