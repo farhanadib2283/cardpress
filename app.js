@@ -167,8 +167,8 @@ function calculateLayout(cfg) {
   const printW = cfg.pageW - cfg.margin * 2;
   const printH = cfg.pageH - cfg.margin * 2;
 
-  const cols = Math.max(1, Math.floor((printW + cfg.gap) / (cfg.boxW + cfg.gap)));
-  const rows = Math.max(1, Math.floor((printH + cfg.gap) / (cfg.boxH + cfg.gap)));
+  const cols = Math.max(1, Math.floor((printW + cfg.gap) / (cfg.boxW + cfg.gap) + 0.01));
+  const rows = Math.max(1, Math.floor((printH + cfg.gap) / (cfg.boxH + cfg.gap) + 0.01));
   const perSheet = cols * rows;
   const totalCards = state.cards.length || 500;
   const sheets = Math.ceil(totalCards / perSheet);
