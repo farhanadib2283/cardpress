@@ -144,18 +144,21 @@ function updateGenerateBtn() {
 
 // ========== Layout Calculation ==========
 function getConfig() {
-  const boxW = parseFloat(el.boxWidth.value) || 59.32;
-  const boxH = parseFloat(el.boxHeight.value) || 94;
-  const cutW = parseFloat(el.cutWidth.value) || 55.5;
-  const cutH = parseFloat(el.cutHeight.value) || 86.5;
+  let boxW = parseFloat(el.boxWidth.value); if (isNaN(boxW)) boxW = 59.32;
+  let boxH = parseFloat(el.boxHeight.value); if (isNaN(boxH)) boxH = 94;
+  let cutW = parseFloat(el.cutWidth.value); if (isNaN(cutW)) cutW = 55.5;
+  let cutH = parseFloat(el.cutHeight.value); if (isNaN(cutH)) cutH = 86.5;
   const bleedX = (boxW - cutW) / 2;
   const bleedY = (boxH - cutH) / 2;
+  let margin = parseFloat(el.margin.value);
+  if (isNaN(margin)) margin = 0;
+  let gap = parseFloat(el.gap.value);
+  if (isNaN(gap)) gap = 0;
   return {
     pageW: parseFloat(el.pageWidth.value) || 310,
     pageH: parseFloat(el.pageHeight.value) || 470,
     boxW, boxH, cutW, cutH, bleedX, bleedY,
-    gap: parseFloat(el.gap.value) || 0,
-    margin: parseFloat(el.margin.value) || 0,
+    gap, margin,
     cutStyle: el.cutLineStyle.value
   };
 }
