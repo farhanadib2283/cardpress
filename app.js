@@ -274,11 +274,8 @@ async function drawPreview() {
     }
   }
 
-  // Outer frame grid (solid red)
-  drawGridCanvas(ctx, cfg, L, scale);
-
-  // Cut lines on FRONT only (dashed inside each cell)
-  if (isFront && cfg.cutStyle !== 'none') drawCutLinesCanvas(ctx, cfg, L, scale);
+  // Crop marks at corners of each cell
+  drawCropMarksCanvas(ctx, cfg, L, scale);
 
   // Page border
   ctx.strokeStyle = '#CCC'; ctx.lineWidth = 1; ctx.setLineDash([]);
@@ -291,30 +288,32 @@ async function drawPreview() {
   ctx.fillText(isFront ? 'POSISI DEPAN (ADA GARIS POTONG)' : 'POSISI BELAKANG (MIRROR, TANPA GARIS POTONG)', cfg.pageW * scale / 2, 4);
 }
 
-function drawGridCanvas(ctx, cfg, L, scale) {
+function drawCropMarksCanvas(ctx, cfg, L, scale) {
   ctx.strokeStyle = '#E53E3E'; ctx.lineWidth = 1.2; ctx.setLineDash([]);
-  for (let c = 0; c <= L.cols; c++) {
-    const x = (L.offX + c * (cfg.boxW + cfg.gap) - cfg.gap / 2) * scale;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
-  }
-  for (let r = 0; r <= L.rows; r++) {
-    const y = (L.offY + r * (cfg.boxH + cfg.gap) - cfg.gap / 2) * scale;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ctx.canvas.width, y); ctx.stroke();
-  }
-}
+  const markLen = 4 * scale; // 4mm crop mark length
+  const markGap = 1.5 * scale; // 1.5mm gap from corner
 
-function drawCutLinesCanvas(ctx, cfg, L, scale) {
-  if (cfg.bleedX <= 0 && cfg.bleedY <= 0) return;
-  ctx.strokeStyle = '#333'; ctx.lineWidth = 0.7;
-  ctx.setLineDash(cfg.cutStyle === 'dashed' ? [5, 3] : []);
   for (let r = 0; r < L.rows; r++) {
     for (let c = 0; c < L.cols; c++) {
-      const cx = (L.offX + c * (cfg.boxW + cfg.gap) + cfg.bleedX) * scale;
-      const cy = (L.offY + r * (cfg.boxH + cfg.gap) + cfg.bleedY) * scale;
-      ctx.strokeRect(cx, cy, cfg.cutW * scale, cfg.cutH * scale);
+      const x = (L.offX + c * (cfg.boxW + cfg.gap)) * scale;
+      const y = (L.offY + r * (cfg.boxH + cfg.gap)) * scale;
+      const w = cfg.boxW * scale;
+      const h = cfg.boxH * scale;
+
+      // Top-left corner
+      ctx.beginPath(); ctx.moveTo(x - markGap, y - markGap - markLen); ctx.lineTo(x - markGap, y - markGap); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - markGap - markLen, y - markGap); ctx.lineTo(x - markGap, y - markGap); ctx.stroke();
+      // Top-right corner
+      ctx.beginPath(); ctx.moveTo(x + w + markGap, y - markGap - markLen); ctx.lineTo(x + w + markGap, y - markGap); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + w + markGap, y - markGap); ctx.lineTo(x + w + markGap + markLen, y - markGap); ctx.stroke();
+      // Bottom-left corner
+      ctx.beginPath(); ctx.moveTo(x - markGap, y + h + markGap); ctx.lineTo(x - markGap, y + h + markGap + markLen); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - markGap - markLen, y + h + markGap); ctx.lineTo(x - markGap, y + h + markGap); ctx.stroke();
+      // Bottom-right corner
+      ctx.beginPath(); ctx.moveTo(x + w + markGap, y + h + markGap); ctx.lineTo(x + w + markGap, y + h + markGap + markLen); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + w + markGap, y + h + markGap); ctx.lineTo(x + w + markGap + markLen, y + h + markGap); ctx.stroke();
     }
   }
-  ctx.setLineDash([]);
 }
 
 // ========== PDF Generation ==========
@@ -366,9 +365,8 @@ async function generatePDF() {
           doc.addImage(allImageData[idx], 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, `card_${idx}`, 'FAST');
         }
       }
-      // Front: red grid + cut lines
-      drawGridPDF(doc, cfg, L);
-      drawCutLinesPDF(doc, cfg, L);
+      // Front: crop marks
+      drawCropMarksPDF(doc, cfg, L);
 
       // === PAGE 2: BACK (mirrored columns) ===
       doc.addPage([cfg.pageW, cfg.pageH], orient);
@@ -386,8 +384,8 @@ async function generatePDF() {
           doc.addImage(allImageData[idx], 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, `card_${idx}`, 'FAST');
         }
       }
-      // Back: red grid only (no cut lines)
-      drawGridPDF(doc, cfg, L);
+      // Back: crop marks
+      drawCropMarksPDF(doc, cfg, L);
 
       const pct = 30 + ((s + 1) / L.sheets) * 65;
       updateProgress(pct, `Sheet ${s + 1} / ${L.sheets}...`);
@@ -408,35 +406,31 @@ async function generatePDF() {
   setTimeout(() => el.progressContainer.classList.remove('active'), 2000);
 }
 
-function drawGridPDF(doc, cfg, L) {
+function drawCropMarksPDF(doc, cfg, L) {
   doc.setDrawColor(229, 62, 62);
-  doc.setLineWidth(0.25);
-  for (let c = 0; c <= L.cols; c++) {
-    const x = L.offX + c * (cfg.boxW + cfg.gap) - cfg.gap / 2;
-    doc.line(x, 0, x, cfg.pageH);
-  }
-  for (let r = 0; r <= L.rows; r++) {
-    const y = L.offY + r * (cfg.boxH + cfg.gap) - cfg.gap / 2;
-    doc.line(0, y, cfg.pageW, y);
-  }
-}
+  doc.setLineWidth(0.2);
+  const m = 3; // mark length in mm
+  const g = 1; // gap from corner in mm
 
-function drawCutLinesPDF(doc, cfg, L) {
-  if (cfg.cutStyle === 'none' || (cfg.bleedX <= 0 && cfg.bleedY <= 0)) return;
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.12);
   for (let r = 0; r < L.rows; r++) {
     for (let c = 0; c < L.cols; c++) {
-      const x = L.offX + c * (cfg.boxW + cfg.gap) + cfg.bleedX;
-      const y = L.offY + r * (cfg.boxH + cfg.gap) + cfg.bleedY;
-      if (cfg.cutStyle === 'dashed') {
-        drawDashedLine(doc, x, y, x + cfg.cutW, y);
-        drawDashedLine(doc, x + cfg.cutW, y, x + cfg.cutW, y + cfg.cutH);
-        drawDashedLine(doc, x + cfg.cutW, y + cfg.cutH, x, y + cfg.cutH);
-        drawDashedLine(doc, x, y + cfg.cutH, x, y);
-      } else {
-        doc.rect(x, y, cfg.cutW, cfg.cutH);
-      }
+      const x = L.offX + c * (cfg.boxW + cfg.gap);
+      const y = L.offY + r * (cfg.boxH + cfg.gap);
+      const w = cfg.boxW;
+      const h = cfg.boxH;
+
+      // Top-left
+      doc.line(x - g, y - g - m, x - g, y - g);
+      doc.line(x - g - m, y - g, x - g, y - g);
+      // Top-right
+      doc.line(x + w + g, y - g - m, x + w + g, y - g);
+      doc.line(x + w + g, y - g, x + w + g + m, y - g);
+      // Bottom-left
+      doc.line(x - g, y + h + g, x - g, y + h + g + m);
+      doc.line(x - g - m, y + h + g, x - g, y + h + g);
+      // Bottom-right
+      doc.line(x + w + g, y + h + g, x + w + g, y + h + g + m);
+      doc.line(x + w + g, y + h + g, x + w + g + m, y + h + g);
     }
   }
 }
