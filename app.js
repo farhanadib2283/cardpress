@@ -391,10 +391,10 @@ async function generatePDF() {
     updateProgress(35, 'Membuat PDF...');
     await yieldToUI();
 
-    // === PHASE 3: Create PDF with compression enabled ===
+    // === PHASE 3: Create PDF ===
     const { jsPDF } = window.jspdf;
     const orient = cfg.pageW > cfg.pageH ? 'landscape' : 'portrait';
-    const doc = new jsPDF({ orientation: orient, unit: 'mm', format: [cfg.pageW, cfg.pageH], compress: true });
+    const doc = new jsPDF({ orientation: orient, unit: 'mm', format: [cfg.pageW, cfg.pageH], compress: false });
 
     // Track which aliases have been registered
     const registeredAliases = new Set();
