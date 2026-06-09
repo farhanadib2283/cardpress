@@ -333,7 +333,22 @@ function drawCropMarksCanvas(ctx, cfg, L, scale) {
   }
 }
 
-// ========== PDF Generation ==========
+// ========== PDF Generation (Optimized) ==========
+
+/**
+ * Yield to browser event loop so UI stays responsive during heavy work.
+ */
+function yieldToUI() {
+  return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
+
+/**
+ * Detect image format from dataURL.
+ */
+function detectImageFormat(dataUrl) {
+  return dataUrl.includes('image/png') ? 'PNG' : 'JPEG';
+}
+
 async function generatePDF() {
   if (state.cards.length === 0) { showToast('Upload kartu terlebih dahulu!', 'error'); return; }
 
@@ -343,31 +358,74 @@ async function generatePDF() {
   el.generateBtn.classList.add('generating');
   el.generateBtn.querySelector('span').textContent = 'Generating...';
   el.progressContainer.classList.add('active');
-  updateProgress(0, 'Loading images...');
-  await sleep(100);
+  updateProgress(0, 'Loading gambar...');
+  await yieldToUI();
 
   try {
-    const allImageData = [];
-    for (let i = 0; i < state.cards.length; i++) {
-      const dataUrl = await readFileAsDataURL(state.cards[i].file);
-      allImageData.push(dataUrl);
-      if (i % 50 === 0) {
-        updateProgress((i / state.cards.length) * 30, `Loading image ${i + 1}/${state.cards.length}...`);
-        await sleep(5);
+    // === PHASE 1: Load all images as original dataURL (no quality loss) ===
+    const BATCH_SIZE = 10;
+    const allImageData = new Array(state.cards.length);
+
+    for (let i = 0; i < state.cards.length; i += BATCH_SIZE) {
+      const batch = [];
+      const end = Math.min(i + BATCH_SIZE, state.cards.length);
+      for (let j = i; j < end; j++) {
+        batch.push(readFileAsDataURL(state.cards[j].file).then(data => { allImageData[j] = data; }));
       }
+      await Promise.all(batch);
+      const pct = (end / state.cards.length) * 30;
+      updateProgress(pct, `Loading gambar ${end}/${state.cards.length}...`);
+      await yieldToUI();
     }
 
-    updateProgress(30, 'Creating PDF...');
-    await sleep(50);
+    // === PHASE 2: Prepare frame image (original quality) ===
+    let frameData = null;
+    let frameFmt = 'JPEG';
+    if (state.frameFile) {
+      updateProgress(32, 'Loading frame...');
+      frameData = await readFileAsDataURL(state.frameFile);
+      frameFmt = detectImageFormat(frameData);
+      await yieldToUI();
+    }
 
+    updateProgress(35, 'Membuat PDF...');
+    await yieldToUI();
+
+    // === PHASE 3: Create PDF with compression enabled ===
     const { jsPDF } = window.jspdf;
     const orient = cfg.pageW > cfg.pageH ? 'landscape' : 'portrait';
     const doc = new jsPDF({ orientation: orient, unit: 'mm', format: [cfg.pageW, cfg.pageH], compress: true });
 
+    // Register frame image ONCE with alias (huge perf win — original quality)
+    const FRAME_ALIAS = 'frame_img';
+    if (frameData) {
+      doc.addImage(frameData, frameFmt, -9999, -9999, 1, 1, FRAME_ALIAS, 'NONE');
+    }
+
+    // Register each card image ONCE with alias (original quality)
+    updateProgress(37, 'Registering images...');
+    for (let i = 0; i < state.cards.length; i++) {
+      const alias = 'card_' + i;
+      const fmt = detectImageFormat(allImageData[i]);
+      doc.addImage(allImageData[i], fmt, -9999, -9999, 1, 1, alias, 'NONE');
+      if (i % 20 === 0) {
+        updateProgress(37 + (i / state.cards.length) * 8, `Registering ${i + 1}/${state.cards.length}...`);
+        await yieldToUI();
+      }
+    }
+
+    // Free raw data from memory now that jsPDF has it cached
+    allImageData.length = 0;
+    frameData = null;
+
+    updateProgress(45, 'Generating pages...');
+    await yieldToUI();
+
+    // === PHASE 4: Build pages using aliases (fast — no re-encoding) ===
     for (let s = 0; s < L.sheets; s++) {
       const startIdx = s * L.perSheet;
 
-      // === PAGE 1: FRONT (normal column order) ===
+      // === FRONT PAGE (normal column order) ===
       if (s > 0) doc.addPage([cfg.pageW, cfg.pageH], orient);
 
       for (let r = 0; r < L.rows; r++) {
@@ -376,18 +434,17 @@ async function generatePDF() {
           if (idx >= state.cards.length) continue;
           const x = L.offX + c * (cfg.boxW + cfg.gap);
           const y = L.offY + r * (cfg.boxH + cfg.gap);
-          if (state.frameDataUrl) {
-            const fmt = state.frameDataUrl.includes('image/png') ? 'PNG' : 'JPEG';
-            doc.addImage(state.frameDataUrl, fmt, x, y, cfg.boxW, cfg.boxH);
+          if (state.frameFile) {
+            doc.addImage(FRAME_ALIAS, frameFmt, x, y, cfg.boxW, cfg.boxH, FRAME_ALIAS, 'NONE');
           }
-          const cfmt = allImageData[idx].includes('image/png') ? 'PNG' : 'JPEG';
-          doc.addImage(allImageData[idx], cfmt, x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH);
+          const cardAlias = 'card_' + idx;
+          doc.addImage(cardAlias, 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, cardAlias, 'NONE');
         }
       }
       drawGridPDF(doc, cfg, L);
       drawCropMarksPDF(doc, cfg, L);
 
-      // === PAGE 2: BACK (mirrored columns) ===
+      // === BACK PAGE (mirrored columns) ===
       doc.addPage([cfg.pageW, cfg.pageH], orient);
 
       for (let r = 0; r < L.rows; r++) {
@@ -397,24 +454,23 @@ async function generatePDF() {
           const mirrorC = L.cols - 1 - c;
           const x = L.offX + mirrorC * (cfg.boxW + cfg.gap);
           const y = L.offY + r * (cfg.boxH + cfg.gap);
-          if (state.frameDataUrl) {
-            const fmt = state.frameDataUrl.includes('image/png') ? 'PNG' : 'JPEG';
-            doc.addImage(state.frameDataUrl, fmt, x, y, cfg.boxW, cfg.boxH);
+          if (state.frameFile) {
+            doc.addImage(FRAME_ALIAS, frameFmt, x, y, cfg.boxW, cfg.boxH, FRAME_ALIAS, 'NONE');
           }
-          const cfmt = allImageData[idx].includes('image/png') ? 'PNG' : 'JPEG';
-          doc.addImage(allImageData[idx], cfmt, x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH);
+          const cardAlias = 'card_' + idx;
+          doc.addImage(cardAlias, 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, cardAlias, 'NONE');
         }
       }
       drawGridPDF(doc, cfg, L);
       drawCropMarksPDF(doc, cfg, L);
 
-      const pct = 30 + ((s + 1) / L.sheets) * 65;
+      const pct = 45 + ((s + 1) / L.sheets) * 50;
       updateProgress(pct, `Sheet ${s + 1} / ${L.sheets}...`);
-      await sleep(10);
+      await yieldToUI();
     }
 
-    updateProgress(98, 'Saving PDF...');
-    await sleep(100);
+    updateProgress(98, 'Menyimpan PDF...');
+    await yieldToUI();
     doc.save(`CardPress_${state.cards.length}cards.pdf`);
     showToast(`PDF berhasil! ${L.sheets} sheets, ${L.sheets * 2} pages, ${state.cards.length} kartu.`, 'success');
   } catch (err) {
