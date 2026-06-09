@@ -396,32 +396,28 @@ async function generatePDF() {
     const orient = cfg.pageW > cfg.pageH ? 'landscape' : 'portrait';
     const doc = new jsPDF({ orientation: orient, unit: 'mm', format: [cfg.pageW, cfg.pageH], compress: true });
 
-    // Register frame image ONCE with alias (huge perf win — original quality)
-    const FRAME_ALIAS = 'frame_img';
-    if (frameData) {
-      doc.addImage(frameData, frameFmt, -9999, -9999, 1, 1, FRAME_ALIAS, 'NONE');
-    }
+    // Track which aliases have been registered
+    const registeredAliases = new Set();
 
-    // Register each card image ONCE with alias (original quality)
-    updateProgress(37, 'Registering images...');
-    for (let i = 0; i < state.cards.length; i++) {
-      const alias = 'card_' + i;
-      const fmt = detectImageFormat(allImageData[i]);
-      doc.addImage(allImageData[i], fmt, -9999, -9999, 1, 1, alias, 'NONE');
-      if (i % 20 === 0) {
-        updateProgress(37 + (i / state.cards.length) * 8, `Registering ${i + 1}/${state.cards.length}...`);
-        await yieldToUI();
+    /**
+     * Add image with alias caching: first call embeds the image data + registers alias,
+     * subsequent calls just reference the alias (no re-encoding).
+     */
+    function addImageWithAlias(dataUrl, format, x, y, w, h, alias) {
+      if (registeredAliases.has(alias)) {
+        // Already registered — just reference by alias (fast, no re-encoding)
+        doc.addImage(alias, format, x, y, w, h, alias, 'NONE');
+      } else {
+        // First time — embed image data and register alias
+        doc.addImage(dataUrl, format, x, y, w, h, alias, 'NONE');
+        registeredAliases.add(alias);
       }
     }
 
-    // Free raw data from memory now that jsPDF has it cached
-    allImageData.length = 0;
-    frameData = null;
-
-    updateProgress(45, 'Generating pages...');
+    updateProgress(40, 'Generating pages...');
     await yieldToUI();
 
-    // === PHASE 4: Build pages using aliases (fast — no re-encoding) ===
+    // === PHASE 4: Build pages ===
     for (let s = 0; s < L.sheets; s++) {
       const startIdx = s * L.perSheet;
 
@@ -434,11 +430,11 @@ async function generatePDF() {
           if (idx >= state.cards.length) continue;
           const x = L.offX + c * (cfg.boxW + cfg.gap);
           const y = L.offY + r * (cfg.boxH + cfg.gap);
-          if (state.frameFile) {
-            doc.addImage(FRAME_ALIAS, frameFmt, x, y, cfg.boxW, cfg.boxH, FRAME_ALIAS, 'NONE');
+          if (frameData) {
+            addImageWithAlias(frameData, frameFmt, x, y, cfg.boxW, cfg.boxH, 'frame_img');
           }
-          const cardAlias = 'card_' + idx;
-          doc.addImage(cardAlias, 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, cardAlias, 'NONE');
+          const cardFmt = detectImageFormat(allImageData[idx]);
+          addImageWithAlias(allImageData[idx], cardFmt, x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, 'card_' + idx);
         }
       }
       drawGridPDF(doc, cfg, L);
@@ -454,17 +450,17 @@ async function generatePDF() {
           const mirrorC = L.cols - 1 - c;
           const x = L.offX + mirrorC * (cfg.boxW + cfg.gap);
           const y = L.offY + r * (cfg.boxH + cfg.gap);
-          if (state.frameFile) {
-            doc.addImage(FRAME_ALIAS, frameFmt, x, y, cfg.boxW, cfg.boxH, FRAME_ALIAS, 'NONE');
+          if (frameData) {
+            addImageWithAlias(frameData, frameFmt, x, y, cfg.boxW, cfg.boxH, 'frame_img');
           }
-          const cardAlias = 'card_' + idx;
-          doc.addImage(cardAlias, 'JPEG', x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, cardAlias, 'NONE');
+          const cardFmt = detectImageFormat(allImageData[idx]);
+          addImageWithAlias(allImageData[idx], cardFmt, x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, 'card_' + idx);
         }
       }
       drawGridPDF(doc, cfg, L);
       drawCropMarksPDF(doc, cfg, L);
 
-      const pct = 45 + ((s + 1) / L.sheets) * 50;
+      const pct = 40 + ((s + 1) / L.sheets) * 55;
       updateProgress(pct, `Sheet ${s + 1} / ${L.sheets}...`);
       await yieldToUI();
     }
@@ -474,8 +470,9 @@ async function generatePDF() {
     doc.save(`CardPress_${state.cards.length}cards.pdf`);
     showToast(`PDF berhasil! ${L.sheets} sheets, ${L.sheets * 2} pages, ${state.cards.length} kartu.`, 'success');
   } catch (err) {
-    console.error(err);
-    showToast('Error: ' + err.message, 'error');
+    console.error('CardPress PDF Error:', err);
+    const errMsg = (err && err.message) ? err.message : String(err);
+    showToast('Error: ' + errMsg, 'error');
   }
 
   el.generateBtn.classList.remove('generating');
