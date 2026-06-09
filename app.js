@@ -333,49 +333,7 @@ function drawCropMarksCanvas(ctx, cfg, L, scale) {
   }
 }
 
-// ========== PDF Generation (Optimized) ==========
-
-/**
- * Yield to browser event loop so UI stays responsive during heavy work.
- */
-function yieldToUI() {
-  return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
-}
-
-/**
- * Detect image format from dataURL.
- */
-function detectImageFormat(dataUrl) {
-  return dataUrl.includes('image/png') ? 'PNG' : 'JPEG';
-}
-
-/**
- * Resize image file to exact print dimensions at 300dpi and convert to JPEG.
- * This does NOT reduce print quality — it produces exactly the pixels needed for 300dpi print.
- * A 2000x3000px PNG becomes 655x1022px JPEG (the max resolution printable at this card size).
- */
-function resizeForPrint(file, printWidthMM, printHeightMM, quality = 0.95) {
-  return new Promise((resolve, reject) => {
-    const DPI = 300;
-    const targetW = Math.round(printWidthMM / 25.4 * DPI);
-    const targetH = Math.round(printHeightMM / 25.4 * DPI);
-
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = targetW;
-      canvas.height = targetH;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, targetW, targetH);
-      URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL('image/jpeg', quality));
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load: ' + file.name)); };
-    img.src = url;
-  });
-}
-
+// ========== PDF Generation ==========
 async function generatePDF() {
   if (state.cards.length === 0) { showToast('Upload kartu terlebih dahulu!', 'error'); return; }
 
@@ -385,58 +343,27 @@ async function generatePDF() {
   el.generateBtn.classList.add('generating');
   el.generateBtn.querySelector('span').textContent = 'Generating...';
   el.progressContainer.classList.add('active');
-  updateProgress(0, 'Optimizing images for print...');
-  await yieldToUI();
+  updateProgress(0, 'Loading images...');
+  await sleep(100);
 
   try {
-    // === PHASE 1: Resize all card images to 300dpi print resolution ===
-    const BATCH_SIZE = 5;
     const allImageData = [];
-    allImageData.length = state.cards.length;
-
-    for (let i = 0; i < state.cards.length; i += BATCH_SIZE) {
-      const batch = [];
-      const end = Math.min(i + BATCH_SIZE, state.cards.length);
-      for (let j = i; j < end; j++) {
-        batch.push(
-          resizeForPrint(state.cards[j].file, cfg.cutW, cfg.cutH)
-            .then(data => { allImageData[j] = data; })
-        );
+    for (let i = 0; i < state.cards.length; i++) {
+      const dataUrl = await readFileAsDataURL(state.cards[i].file);
+      allImageData.push(dataUrl);
+      if (i % 50 === 0) {
+        updateProgress((i / state.cards.length) * 30, `Loading image ${i + 1}/${state.cards.length}...`);
+        await sleep(5);
       }
-      await Promise.all(batch);
-      updateProgress((end / state.cards.length) * 40, `Optimizing image ${end}/${state.cards.length}...`);
-      await yieldToUI();
     }
 
-    // === PHASE 2: Prepare frame image (resize to box dimensions) ===
-    let frameData = null;
-    if (state.frameFile) {
-      updateProgress(42, 'Optimizing frame...');
-      frameData = await resizeForPrint(state.frameFile, cfg.boxW, cfg.boxH, 0.95);
-      await yieldToUI();
-    }
+    updateProgress(30, 'Creating PDF...');
+    await sleep(50);
 
-    updateProgress(45, 'Creating PDF...');
-    await yieldToUI();
-
-    // === PHASE 3: Create PDF ===
     const { jsPDF } = window.jspdf;
     const orient = cfg.pageW > cfg.pageH ? 'landscape' : 'portrait';
-    const doc = new jsPDF({ orientation: orient, unit: 'mm', format: [cfg.pageW, cfg.pageH], compress: false });
+    const doc = new jsPDF({ orientation: orient, unit: 'mm', format: [cfg.pageW, cfg.pageH], compress: true });
 
-    // Alias tracking: embed image data once, reference by alias after
-    const registeredAliases = new Set();
-
-    function addImg(dataUrl, x, y, w, h, alias) {
-      if (registeredAliases.has(alias)) {
-        doc.addImage(alias, 'JPEG', x, y, w, h, alias, 'NONE');
-      } else {
-        doc.addImage(dataUrl, 'JPEG', x, y, w, h, alias, 'NONE');
-        registeredAliases.add(alias);
-      }
-    }
-
-    // === PHASE 4: Build pages ===
     for (let s = 0; s < L.sheets; s++) {
       const startIdx = s * L.perSheet;
 
@@ -449,10 +376,12 @@ async function generatePDF() {
           if (idx >= state.cards.length) continue;
           const x = L.offX + c * (cfg.boxW + cfg.gap);
           const y = L.offY + r * (cfg.boxH + cfg.gap);
-          if (frameData) {
-            addImg(frameData, x, y, cfg.boxW, cfg.boxH, 'frame_img');
+          if (state.frameDataUrl) {
+            const fmt = state.frameDataUrl.includes('image/png') ? 'PNG' : 'JPEG';
+            doc.addImage(state.frameDataUrl, fmt, x, y, cfg.boxW, cfg.boxH);
           }
-          addImg(allImageData[idx], x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, 'card_' + idx);
+          const cfmt = allImageData[idx].includes('image/png') ? 'PNG' : 'JPEG';
+          doc.addImage(allImageData[idx], cfmt, x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH);
         }
       }
       drawGridPDF(doc, cfg, L);
@@ -468,28 +397,29 @@ async function generatePDF() {
           const mirrorC = L.cols - 1 - c;
           const x = L.offX + mirrorC * (cfg.boxW + cfg.gap);
           const y = L.offY + r * (cfg.boxH + cfg.gap);
-          if (frameData) {
-            addImg(frameData, x, y, cfg.boxW, cfg.boxH, 'frame_img');
+          if (state.frameDataUrl) {
+            const fmt = state.frameDataUrl.includes('image/png') ? 'PNG' : 'JPEG';
+            doc.addImage(state.frameDataUrl, fmt, x, y, cfg.boxW, cfg.boxH);
           }
-          addImg(allImageData[idx], x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH, 'card_' + idx);
+          const cfmt = allImageData[idx].includes('image/png') ? 'PNG' : 'JPEG';
+          doc.addImage(allImageData[idx], cfmt, x + cfg.bleedX, y + cfg.bleedY, cfg.cutW, cfg.cutH);
         }
       }
       drawGridPDF(doc, cfg, L);
       drawCropMarksPDF(doc, cfg, L);
 
-      const pct = 45 + ((s + 1) / L.sheets) * 50;
+      const pct = 30 + ((s + 1) / L.sheets) * 65;
       updateProgress(pct, `Sheet ${s + 1} / ${L.sheets}...`);
-      await yieldToUI();
+      await sleep(10);
     }
 
     updateProgress(98, 'Saving PDF...');
-    await yieldToUI();
+    await sleep(100);
     doc.save(`CardPress_${state.cards.length}cards.pdf`);
     showToast(`PDF berhasil! ${L.sheets} sheets, ${L.sheets * 2} pages, ${state.cards.length} kartu.`, 'success');
   } catch (err) {
-    console.error('CardPress PDF Error:', err);
-    const errMsg = (err && err.message) ? err.message : String(err);
-    showToast('Error: ' + errMsg, 'error');
+    console.error(err);
+    showToast('Error: ' + err.message, 'error');
   }
 
   el.generateBtn.classList.remove('generating');
